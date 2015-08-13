@@ -3,10 +3,12 @@
 // license that can be found in the LICENSE-APACHE-V2 file.
 
 var FS = require("fs");
+var OS = require('os');
 var Path = require("path");
 
 var MemoryStream = require("memorystream");
 var ShellJS = require("shelljs");
+var Targz = require('tar.gz');
 
 var BASE_URL = "https://download.01.org/crosswalk/releases/crosswalk/android/";
 
@@ -46,11 +48,14 @@ function AndroidDependencies(application, channel) {
 
     this._application = application;
 
-    if (CHANNELS.indexOf(channel) == -1) {
-        throw new InvalidChannelError("Unknown channel " + channel);
-    }
+    if (channel) {
 
-    this._channel = channel;
+        if (CHANNELS.indexOf(channel) == -1) {
+            throw new InvalidChannelError("Unknown channel " + channel);
+        }
+
+        this._channel = channel;
+    }
 }
 
 /**
@@ -192,7 +197,96 @@ function(version, defaultPath, callback) {
     });
 };
 
+AndroidDependencies.prototype.downloadWebP =
+function(version, defaultPath, callback) {
 
+    // Namespaces
+    var exceptions = this._application.exceptions;
+    var util = this._application.util;
+
+    var output = this._application.output;
+    var platform = OS.platform();
+    var arch = OS.arch();
+    var filename = ""
+    if (platform == "windows") {
+        if (arch == "ia32") arch = "x86";
+        var ext = ".zip";
+        filename = "libwebp-" + version +
+                   "-" + platform +
+                   "-" + arch + ext;
+    } else  if (platform == "linux") {
+        if (arch == "ia32") arch = "x86-32";
+        if (arch == "x64") arch = "x86-64";
+        var ext = ".tar.gz";
+        filename = "libwebp-" + version +
+                   "-" + platform +
+                   "-" + arch + ext;
+    } else if (platform == "mac") {
+        var ext = ".tar.gz";
+        filename = "libwebp-" + version +
+                   "-" + platform + ext;
+    }
+
+    var url = "http://downloads.webmproject.org/releases/webp/" + filename;
+
+    var filePath = Path.join(defaultPath, filename);
+    if (ShellJS.test("-e", filePath))
+        ShellJS.rm("-f", filePath);
+    var extractPath = "";
+    if (platform == "windows") {
+        extractPath = Path.join(Path.dirname(filePath), Path.basename(filePath, ".zip"));
+    } else {
+        extractPath = Path.join(Path.dirname(filePath), Path.basename(filePath, ".tar.gz"));
+    }
+    if (ShellJS.test("-e", extractPath)) ShellJS.rm("-rf", extractPath);
+
+    var handler = new util.DownloadHandler(defaultPath, filename);
+
+    // Download
+    var label = "Downloading WebP " + version;
+    var indicator = output.createFiniteProgress(label);
+
+    var stream = handler.createStream();
+    var downloader = new util.Downloader(url, stream);
+    downloader.progress = function(progress) {
+        indicator.update(progress);
+    };
+    downloader.get(function(errormsg) {
+
+        indicator.done("");
+
+        if (errormsg) {
+
+            callback(null, errormsg);
+
+        } else {
+
+            var finishedPath = handler.finish(process.env.CROSSWALK_APP_TOOLS_CACHE_DIR);
+            var extractPath = "";
+            var cwebpName = ""
+
+            if (platform == "windows") {
+                extractPath = Path.join(Path.dirname(finishedPath), Path.basename(finishedPath, ".zip"));
+                cwebpName = "cwebp.exe";
+            } else {
+                var extractPath = Path.join(Path.dirname(finishedPath), Path.basename(finishedPath, ".tar.gz"));
+                cwebpName = "cwebp";
+            }
+
+            Targz().extract(finishedPath, defaultPath) 
+                .then(function(){
+                    setTimeout(function() {
+                        var webpPath = Path.join(Path.join(Path.dirname(Path.dirname(__dirname)), "src"), cwebpName);
+                        ShellJS.cp(Path.join(Path.join(extractPath, "bin"), cwebpName), webpPath);
+                        callback(webpPath);
+                    }, 1000);
+                })
+                .catch(function(err){
+                    output.error('Fail to extract ' + finishedPath + "\n" + err.stack);
+                });
+        }
+    });
+};
 
 /**
  * Creates a new InvalidChannelError.

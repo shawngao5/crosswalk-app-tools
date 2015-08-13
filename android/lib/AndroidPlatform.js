@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE-APACHE-V2 file.
 
 var FS = require("fs");
-
+var OS = require('os');
 var Path = require('path');
 var ShellJS = require("shelljs");
 
@@ -339,6 +339,41 @@ function(versionSpec, platformPath, callback) {
             callback(importedVersion, errormsg);
 
         }.bind(this));
+    }.bind(this));
+};
+
+AndroidPlatform.prototype.importWebP =
+function(versionSpec, callback) {
+
+    var platform = OS.platform();
+    if (platform == "windows")
+        cwebpName = "cwebp.exe";
+    else
+        cwebpName = "cwebp";
+
+    var webpPath = Path.join(Path.join(Path.dirname(Path.dirname(__dirname)), "src"), cwebpName);
+    
+    if (ShellJS.test("-f", webpPath)) {
+        callback(webpPath);
+        return;
+    }
+
+    // Download latest Crosswalk
+    var deps = new AndroidDependencies(this.application);
+    deps.downloadWebP(versionSpec, OS.tmpdir(),
+                  function(filename, errormsg) {
+
+        if (errormsg) {
+            callback(null, errormsg);
+            return;
+        }
+
+        if (!filename) {
+            callback(null, "Failed to download WebP");
+            return;
+        }
+
+        callback(filename);
     }.bind(this));
 };
 
